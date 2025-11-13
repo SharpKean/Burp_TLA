@@ -127,7 +127,7 @@ public class RightUI extends JPanel {
         gbc.fill = GridBagConstraints.BOTH;
 
         JPanel bottomPanel = new JPanel(new BorderLayout());
-        bottomLabel = new JLabel("【 漏洞检测模块 】", SwingConstants.CENTER);
+        bottomLabel = new JLabel("【 综合检测模块 】", SwingConstants.CENTER);
         xssCheckBox = new JCheckBox("启用 XSS 检测");
         xssCheckBox.setSelected(false);
 
