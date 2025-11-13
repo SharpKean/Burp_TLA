@@ -6,6 +6,16 @@
 Java版本11.0.15.1
 ```
 
+## 更新说明V1.3（2025.11.12）
+
+本次版本迭代，优化的核心在于改进过滤器和线程管理的方式，以更好地支持目录扫描、XSS检测等现有及未来的扩展模块，具体更新如下：
+
+✅ 优化扩展功能模块
+
+1).对过滤器和线程数进行了统一的管理，改为全局
+
+![image-20240229163245151](https://mmbiz.qpic.cn/mmbiz_png/8h5fX1cyibE3HA8eWaiaGgFpoutBbibQ66pOI9HCH48QxNApkB5A3MrHMGcJWQQCTDqsibatjpib0Onx3ib7a0ibRDEHg/640)
+
 ## 更新说明V1.2（2025.08.03）
 
 这里感谢【tang51678】提出的建议
@@ -52,9 +62,14 @@ Java版本11.0.15.1
 1).参数覆盖全面，自动筛选参数
 2).模拟真实访问行为，不会**触发WAF告警**
 3).支持批量发送至 **Burp Repeater 模块**，便于进一步复现与验证
-复现与验证
 
-![image-20240229163245151](https://mmbiz.qpic.cn/mmbiz_png/8h5fX1cyibE2ibkIFhiaptTLPMtsUXYBdvO0JQ96TibI5yKLNGjuiaM3ibcwvrDiapeZz2Q3K6Sd8EKRgyUW5GXhlgLeg/640)
+```
+要查看更新功能的演示，请访问此处：https://mp.weixin.qq.com/s/bimRAEvlDhfzJQroIuBsGw
+```
+
+## 流程图
+
+![image-20240229163245151](https://mmbiz.qpic.cn/mmbiz_png/8h5fX1cyibE206u8pWCxibGXVFZQQPDib6bW71TQcVkKtGTY98siblq6xmjkhIZu8v5Zm5Kbw2ZyzUv3gJM9J6Inug/640)
 
 ## 功能介绍
 
@@ -103,6 +118,16 @@ TLA Watcher 主要由两个核心模块组成：流量管理模块 和 扩展功
 ​	支持将检测出的 XSS 漏洞**批量发送到 Burp Repeater 模块**，方便快速复现与验证
 
 ![image-20240229163245151](https://mmbiz.qpic.cn/mmbiz_png/8h5fX1cyibE2ibkIFhiaptTLPMtsUXYBdvOvRsmY82Bdzmv5jncIwvIrnoZjpAm7zzGtpgvA9XZUPcBHPomcYOeSA/640)
+
+## 后续更新
+
+```
+在TLA Watcher V1.4版本中
+XSS检测模块新增对 Referer 和 Cookie 、JSON格式的检测支持，发现更多的可能性；
+同时新增了SSTI检测模块，但该模块目前尚未完善，将在后续版本中完成并一同迭代发布。
+```
+
+![image-20240229163245151](https://mmbiz.qpic.cn/mmbiz_png/8h5fX1cyibE3HA8eWaiaGgFpoutBbibQ66pxx1cDQTIW2z4ocVf1oibHZCR1wkgibFdXRgYaoNzdCTfTpmfCtEEIe9A/640)
 
 ## 常见问题
 
