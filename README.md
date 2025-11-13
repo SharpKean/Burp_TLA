@@ -35,7 +35,7 @@ Java版本11.0.15.1
 1).流量管理模块新增**发送Repeater功能和复制URL功能**支持右键**单个/批量**发送到burp。
 
 ```
-要查看更新功能的演示，请访问此处：https://mp.weixin.qq.com/s/hPlCuOJs5o_r2Wlo8GOj9Q
+看更新功能的演示，请访问此处：https://mp.weixin.qq.com/s/hPlCuOJs5o_r2Wlo8GOj9Q
 ```
 
 ## 更新说明V1.1（2025.07.11）
@@ -64,7 +64,7 @@ Java版本11.0.15.1
 3).支持批量发送至 **Burp Repeater 模块**，便于进一步复现与验证
 
 ```
-要查看更新功能的演示，请访问此处：https://mp.weixin.qq.com/s/bimRAEvlDhfzJQroIuBsGw
+查看更新功能的演示，请访问此处：https://mp.weixin.qq.com/s/bimRAEvlDhfzJQroIuBsGw
 ```
 
 ## 流程图
