@@ -13,25 +13,27 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.net.URL;
 
-import burp.BurpExtender;
+import burp.BurpExtender; // 确保 BurpExtender 存在
 
 public class RightDownUI extends JPanel {
     private JTable resultTable, bugResultTable;
     private DefaultTableModel resultTableModel, bugResultTableModel;
     private JPanel resultPanel, bugResultPanel;
     private JPopupMenu popupMenuForScan, popupMenuForBug;
-    private static int repeaterCounter = 1;
+    public static int repeaterCounter = 1;
 
     public RightDownUI() {
         setLayout(new BorderLayout());
         resultPanel = new JPanel(new BorderLayout());
         bugResultPanel = new JPanel(new BorderLayout());
+
         resultTableModel = new DefaultTableModel(new Object[]{"URL", "Status", "Length"}, 0);
         resultTable = new JTable(resultTableModel);
         TableColumnModel scanColumnModel = resultTable.getColumnModel();
-        scanColumnModel.getColumn(0).setPreferredWidth(500);
-        scanColumnModel.getColumn(1).setPreferredWidth(50);
-        scanColumnModel.getColumn(2).setPreferredWidth(50);
+        scanColumnModel.getColumn(0).setPreferredWidth(500); // URL
+        scanColumnModel.getColumn(1).setPreferredWidth(50);  // Status
+        scanColumnModel.getColumn(2).setPreferredWidth(50);  // Length
+
         TableRowSorter<DefaultTableModel> scanSorter = new TableRowSorter<>(resultTableModel);
         resultTable.setRowSorter(scanSorter);
         popupMenuForScan = createScanPopupMenu();
@@ -43,6 +45,7 @@ public class RightDownUI extends JPanel {
                 }
             }
         });
+
         JScrollPane scanScrollPane = new JScrollPane(resultTable);
         resultPanel.add(scanScrollPane, BorderLayout.CENTER);
         bugResultTableModel = new DefaultTableModel(
@@ -56,10 +59,13 @@ public class RightDownUI extends JPanel {
         bugColumnModel.getColumn(3).setPreferredWidth(60);
         bugColumnModel.getColumn(4).setPreferredWidth(50);
         bugColumnModel.getColumn(5).setPreferredWidth(50);
-        bugColumnModel.getColumn(6).setMinWidth(0);
+        bugColumnModel.getColumn(6).setMinWidth(0); 
         bugColumnModel.getColumn(6).setMaxWidth(0);
+        bugColumnModel.getColumn(6).setWidth(0);
+
         TableRowSorter<DefaultTableModel> bugSorter = new TableRowSorter<>(bugResultTableModel);
         bugResultTable.setRowSorter(bugSorter);
+
         popupMenuForBug = createBugPopupMenu();
         bugResultTable.addMouseListener(new MouseAdapter() {
             @Override
@@ -73,7 +79,6 @@ public class RightDownUI extends JPanel {
         bugResultPanel.add(bugScrollPane, BorderLayout.CENTER);
         JButton resultBtn = new JButton("目录扫描汇总");
         JButton bugResultBtn = new JButton("综合检测汇总");
-
         resultBtn.setBorderPainted(false);
         bugResultBtn.setBorderPainted(false);
         resultBtn.addActionListener(e -> switchToScanResult());
@@ -86,7 +91,7 @@ public class RightDownUI extends JPanel {
         bugResultBtn.setBackground(new Color(240, 240, 240));
         add(resultPanel, BorderLayout.CENTER);
         add(bugResultPanel, BorderLayout.CENTER);
-        remove(resultPanel); // T|A|L_Wa|tc|her
+        remove(resultPanel); // 初始隐藏漏扫结果面板
     }
     private JPopupMenu createBugPopupMenu() {
         JPopupMenu menu = new JPopupMenu();
@@ -103,7 +108,6 @@ public class RightDownUI extends JPanel {
                     String host = url.getHost();
                     int port = url.getPort() != -1 ? url.getPort() : ("https".equals(url.getProtocol()) ? 443 : 80);
                     boolean useHttps = "https".equals(url.getProtocol());
-
                     BurpExtender.callbacks.sendToRepeater(
                             host,
                             port,
@@ -122,11 +126,11 @@ public class RightDownUI extends JPanel {
             StringBuilder sb = new StringBuilder();
             for (int row : selectedRows) {
                 Object urlValue = bugResultTableModel.getValueAt(bugResultTable.convertRowIndexToModel(row), 2);
-                if (urlValue != null) {
+                if (urlValue != 1) {
                     sb.append(urlValue.toString()).append("\n");
                 }
             }
-            if (sb.length() > 0) {
+            if (sb.length() > 1) {
                 StringSelection selection = new StringSelection(sb.toString());
                 Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
                 clipboard.setContents(selection, null);
@@ -155,10 +159,9 @@ public class RightDownUI extends JPanel {
         revalidate();
         repaint();
         JButton[] buttons = getComponentsInTopPanel();
-        buttons[0].setBackground(new Color(240, 240, 240));
+        buttons[2].setBackground(new Color(240, 240, 240));
         buttons[1].setBackground(null);
     }
-
     private void switchToBugResult() {
         remove(resultPanel);
         add(bugResultPanel, BorderLayout.CENTER);
@@ -168,7 +171,6 @@ public class RightDownUI extends JPanel {
         buttons[1].setBackground(new Color(240, 240, 240));
         buttons[0].setBackground(null);
     }
-
     private JButton[] getComponentsInTopPanel() {
         JPanel topPanel = (JPanel) getComponent(0);
         Component[] components = topPanel.getComponents();
@@ -180,10 +182,8 @@ public class RightDownUI extends JPanel {
         }
         return buttons;
     }
-
     private JPopupMenu createScanPopupMenu() {
         JPopupMenu menu = new JPopupMenu();
-
         JMenuItem copyItem = new JMenuItem("复制 URL");
         copyItem.addActionListener(e -> {
             int[] rows = resultTable.getSelectedRows();
@@ -208,7 +208,6 @@ public class RightDownUI extends JPanel {
         menu.add(deleteItem);
         return menu;
     }
-
     public void addResult(String url, String status, int length) {
         resultTableModel.addRow(new Object[]{url, status, length});
     }
