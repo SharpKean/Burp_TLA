@@ -6,18 +6,15 @@ import java.awt.event.ActionListener;
 import java.io.PrintWriter;
 import java.net.URL;
 import java.net.URLDecoder;
-import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import javax.swing.*;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
-
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import javax.swing.*;
 
 import ui.Config;
 import ui.MainUI;
@@ -25,88 +22,130 @@ import ui.MainUI;
 public class BurpExtender implements IBurpExtender, ITab, IContextMenuFactory, IHttpListener {
     public static IBurpExtenderCallbacks callbacks;
     private PrintWriter stdout;
-    private String defaultImportPath;
     private MainUI mainUI;
-    private List<String> domainUrls = new ArrayList<>();
-    private List<String> routeUrls = new ArrayList<>();
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
 
-    String filterUrl;
+    private final Set<String> domainUrls = ConcurrentHashMap.newKeySet();
+    private final Set<String> routeUrls = ConcurrentHashMap.newKeySet();
 
     List<String> payloads = Arrays.asList("aaaaa''", "aaaaa\"\"", "aaaaa%27%27", "aaaaa%22%22");
 
-
-
+    @Override
     public void registerExtenderCallbacks(IBurpExtenderCallbacks callbacks) {
         this.callbacks = callbacks;
         callbacks.setExtensionName("TLA Watcher");
         this.stdout = new PrintWriter(callbacks.getStdout(), true);
 
         this.stdout.println("===============================");
-        this.stdout.println("TLA Watcher V1.2 Loaded Successfully!!!!\n");
+        this.stdout.println("TLA Watcher V1.3 (Refactored) Loaded Successfully!!!!\n");
         this.stdout.println("Project URL: https://github.com/SharpKean/Brup_TLA");
         this.stdout.println("Author: SharpKean");
         this.stdout.println("===============================");
+
         this.mainUI = new MainUI();
         callbacks.customizeUiComponent(this.mainUI.root);
         callbacks.addSuiteTab(this);
         callbacks.registerContextMenuFactory(this);
         callbacks.registerHttpListener(this);
-
     }
+
+
+    private int getGlobalThreadNum() {
+        try {
+            String threadStr = Config.getDBFile("thread_num");
+            if (threadStr != null && !threadStr.trim().isEmpty()) {
+                return Integer.parseInt(threadStr.trim());
+            }
+        } catch (Exception e) {
+            stdout.println("[!] Failed to parse thread_num, using default 4");
+        }
+        return 4;
+    }
+
+    private String getGlobalFilterUrls() {
+        String filter = Config.getDBFile("filter_url");
+        return filter != null ? filter : "";
+    }
+
+    private boolean isDomainFiltered(String host) {
+        if (host == null) return false;
+        String globalFilter = getGlobalFilterUrls();
+        if (globalFilter.isEmpty()) return false;
+
+        String key;
+        int dotCount = host.split("\\.").length - 1;
+        if (dotCount <= 1) {
+            key = host.replaceAll("^(.*?\\d*:?\\d*\\/\\/)?([^:\\/]*).*$", "$2");
+        } else {
+            key = host.replaceAll("^(.*?\\.)?([^:\\/]*).*$", "$2");
+        }
+        return globalFilter.contains(key);
+    }
+
+    @Override
     public String getTabCaption() {
         return "TLA Watcher";
     }
+
+    @Override
     public Component getUiComponent() {
         return this.mainUI.root;
     }
+
     public static IMessageEditor createMessageEditor(boolean isRequest) {
         return callbacks.createMessageEditor(null, isRequest);
     }
+
+    // ========== HTTP Listener ==========
+    @Override
     public void processHttpMessage(int toolFlag, boolean messageIsRequest, IHttpRequestResponse messageInfo) {
         if (toolFlag != IBurpExtenderCallbacks.TOOL_PROXY) {
             return;
         }
+
+        IRequestInfo requestInfo = callbacks.getHelpers().analyzeRequest(messageInfo);
+        String host = requestInfo.getUrl().getHost();
+
+        if (isDomainFiltered(host)) {
+            return;
+        }
+
         if (!messageIsRequest) {
             String xssScan = Config.getDBFile("xss_enable");
-            if (xssScan.equals("true")) {
+            if ("true".equals(xssScan)) {
                 executor.submit(() -> {
                     try {
-                        IExtensionHelpers helpers = this.callbacks.getHelpers();
+                        IExtensionHelpers helpers = callbacks.getHelpers();
                         IResponseInfo responseInfo = helpers.analyzeResponse(messageInfo.getResponse());
                         int statusCode = responseInfo.getStatusCode();
-                        boolean is404Response = (statusCode == 404);
-                        List<String> headers = responseInfo.getHeaders();
+                        if (statusCode == 404) return;
+
                         boolean containsTextHtml = false;
-                        for (String header : headers) {
-                            if (header != null && header.toLowerCase().startsWith("content-type:")) {
-                                if (header.toLowerCase().contains("text/html")) {
-                                    containsTextHtml = true;
-                                    break;
-                                }
+                        for (String header : responseInfo.getHeaders()) {
+                            if (header != null && header.toLowerCase().startsWith("content-type:") &&
+                                    header.toLowerCase().contains("text/html")) {
+                                containsTextHtml = true;
+                                break;
                             }
                         }
-                        if (containsTextHtml && !is404Response) {
-                            IRequestInfo requestInfo = callbacks.getHelpers().analyzeRequest(messageInfo);
-                            List<IParameter> parameters = requestInfo.getParameters();
+                        if (!containsTextHtml) return;
 
-                            for (IParameter parameter : parameters) {
-                                if (parameter.getType() == IParameter.PARAM_COOKIE) {
-                                    continue;
-                                }
-                                if (parameter.getValue() != null && parameter.getValue().length() > 150) {
-                                    continue;
-                                }
-                                byte[] responseBodyBytes = messageInfo.getResponse();
-                                int bodyOffset = responseInfo.getBodyOffset();
-                                byte[] bodyBytes = Arrays.copyOfRange(responseBodyBytes, bodyOffset, responseBodyBytes.length);
-                                String responseBody = new String(bodyBytes, StandardCharsets.UTF_8);
-                                String paramValue = URLDecoder.decode(parameter.getValue(),StandardCharsets.UTF_8.name());
-                                if (paramValue != null && !paramValue.trim().isEmpty() && responseBody.contains(paramValue)) {
-                                    String request_url = requestInfo.getUrl().toString();
-                                    String request_method = requestInfo.getMethod();
-                                    sendXssTestRequests(messageInfo, parameter, request_url, request_method);
-                                }
+                        byte[] responseBodyBytes = messageInfo.getResponse();
+                        int bodyOffset = responseInfo.getBodyOffset();
+                        byte[] bodyBytes = Arrays.copyOfRange(responseBodyBytes, bodyOffset, responseBodyBytes.length);
+                        String responseBody = new String(bodyBytes, StandardCharsets.UTF_8);
+
+                        List<IParameter> parameters = requestInfo.getParameters();
+                        for (IParameter param : parameters) {
+                            if (param.getType() == IParameter.PARAM_COOKIE) continue;
+                            if (param.getValue() != null && param.getValue().length() > 150) continue;
+
+                            String decodedValue = URLDecoder.decode(param.getValue(), StandardCharsets.UTF_8.name());
+                            if (decodedValue != null && !decodedValue.trim().isEmpty() && responseBody.contains(decodedValue)) {
+                                final IParameter finalParam = param;
+                                final String finalUrl = requestInfo.getUrl().toString();
+                                final String finalMethod = requestInfo.getMethod();
+                                sendXssTestRequests(messageInfo, finalParam, finalUrl, finalMethod);
                             }
                         }
                     } catch (Exception e) {
@@ -116,131 +155,110 @@ public class BurpExtender implements IBurpExtender, ITab, IContextMenuFactory, I
             }
         }
 
-        if (toolFlag == IBurpExtenderCallbacks.TOOL_PROXY && messageIsRequest) {
-            String typeScan = Config.getDBFile("type_scan");
-            if (Integer.parseInt(typeScan) != 3) {
-                Thread scanThread = new Thread(() -> {
-                    String dics = mainUI.getRightPanel().getFileContentList().toString().replace("[", "").replace("]", "");;   //读取字典
-                    String threadNum = Config.getDBFile("thread_num");
-                    String filterUrls = Config.getDBFile("filter_url");
-                    IRequestInfo requestInfo = callbacks.getHelpers().analyzeRequest(messageInfo);
-                    List<CompletableFuture<Void>> futures = new ArrayList<>();
-                    for (int c = 0; c < Integer.parseInt(threadNum); c++) {
-                        CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
-                            String urlString = requestInfo.getUrl().toString();
-                            String[] parts = urlString.split("\\?");
-                            String path = parts[0];
-                            String[] pathParts = path.split("/");
-                            String domain = pathParts[0] + "//" + pathParts[2];
-                            path = domain;
-                            String doamin_route = "";
-                            int count = pathParts[2].split("\\.").length - 1;
-                            if (count <= 1){
-                                filterUrl = pathParts[2].replaceAll("^(.*?\\d*:?\\d*\\/\\/)?([^:\\/]*).*$", "$2");
-                            }else{
-                                filterUrl = pathParts[2].replaceAll("^(.*?\\.)?([^:\\/]*).*$", "$2");
-                            }
-                            if (!filterUrls.contains(filterUrl)) {
-                                if (Integer.parseInt(typeScan) == 2) {
-                                    for(int i=3; i<pathParts.length; i++) {
-                                        if(!routeUrls.contains(path)) {
-                                            routeUrls.add(path);
-                                            String[] dictionary = dics.split(",");
-                                            for (String word : dictionary) {
-                                                String trimmedWord = word.trim();
-
-                                                IRequestInfo a = callbacks.getHelpers().analyzeRequest(messageInfo);
-                                                String requestHeaders = "";
-                                                List<String> headers = a.getHeaders();
-                                                StringBuilder headerBuilder = new StringBuilder();
-                                                boolean firstLine = true;
-                                                for (String header : headers) {
-                                                    if (firstLine) {
-                                                        int firstSpaceIndex = header.indexOf(' ');
-                                                        if (firstSpaceIndex != -1) {
-                                                            int secondSpaceIndex = header.indexOf(' ', firstSpaceIndex + 1);
-                                                            if (secondSpaceIndex != -1) {
-                                                                header = header.substring(0, firstSpaceIndex + 1) + doamin_route + trimmedWord + header.substring(secondSpaceIndex);
-                                                                firstLine = false;
-                                                            }
-                                                        }
-                                                    }
-                                                    headerBuilder.append(header).append("\r\n");
-                                                }
-                                                requestHeaders = headerBuilder.toString();
-                                                byte[] requestBody = Arrays.copyOfRange(messageInfo.getRequest(), requestInfo.getBodyOffset(), messageInfo.getRequest().length);
-                                                String requestBodyString = new String(requestBody, StandardCharsets.UTF_8);
-                                                String fullRequest = requestHeaders + "\r\n" + requestBodyString;
-                                                IHttpRequestResponse result = callbacks.makeHttpRequest(messageInfo.getHttpService(), fullRequest.getBytes());
-                                                // 获取响应
-                                                byte[] response = result.getResponse();
-                                                IResponseInfo responseInfo = callbacks.getHelpers().analyzeResponse(response);
-                                                short statusCode = responseInfo.getStatusCode();
-                                                int responseLength = response.length; // 获取响应长度
-
-
-                                                if ((statusCode >= 300 && statusCode < 400) || statusCode == 200 || statusCode == 403) {
-                                                    mainUI.getRightDownPanel().addResult(path + trimmedWord , String.valueOf(statusCode),responseLength);
-                                                }
-                                            }
-                                        }
-                                        path += "/" + pathParts[i];
-                                        doamin_route += "/"+pathParts[i];
-                                    }
-
-                                }else {
-                                    String url = requestInfo.getUrl().getHost();
-                                    if(!domainUrls.contains(url)) {
-                                        domainUrls.add(url);
-                                        String[] dictionary = dics.split(",");
-                                        for (String word : dictionary) {
-                                            String trimmedWord = word.trim();
-
-                                            IRequestInfo a = callbacks.getHelpers().analyzeRequest(messageInfo);
-                                            String requestHeaders = "";
-                                            List<String> headers = a.getHeaders();
-                                            StringBuilder headerBuilder = new StringBuilder();
-                                            boolean firstLine = true;
-                                            for (String header : headers) {
-                                                if (firstLine) {
-                                                    int firstSpaceIndex = header.indexOf(' ');
-                                                    if (firstSpaceIndex != -1) {
-                                                        int secondSpaceIndex = header.indexOf(' ', firstSpaceIndex + 1);
-                                                        if (secondSpaceIndex != -1) {
-                                                            header = header.substring(0, firstSpaceIndex + 1) + trimmedWord + header.substring(secondSpaceIndex);
-                                                            firstLine = false;
-                                                        }
-                                                    }
-                                                }
-                                                headerBuilder.append(header).append("\r\n");
-                                            }
-                                            requestHeaders = headerBuilder.toString();
-                                            byte[] requestBody = Arrays.copyOfRange(messageInfo.getRequest(), requestInfo.getBodyOffset(), messageInfo.getRequest().length);
-                                            String requestBodyString = new String(requestBody, StandardCharsets.UTF_8);
-                                            String fullRequest = requestHeaders + "\r\n" + requestBodyString;
-                                            IHttpRequestResponse result = callbacks.makeHttpRequest(messageInfo.getHttpService(), fullRequest.getBytes());
-                                            byte[] response = result.getResponse();
-                                            IResponseInfo responseInfo = callbacks.getHelpers().analyzeResponse(response);
-                                            short statusCode = responseInfo.getStatusCode();
-                                            int responseLength = response.length;
-                                            if ((statusCode >= 300 && statusCode < 400) || statusCode == 200 || statusCode == 403) {
-                                                mainUI.getRightDownPanel().addResult(path + trimmedWord , String.valueOf(statusCode),responseLength);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                        futures.add(future);
-                    }
-                    CompletableFuture<Void> allFutures = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
-                    allFutures.join();
-                });
-
-                scanThread.start();
+        if (messageIsRequest) {
+            int typeScanTemp = 1;
+            try {
+                String typeScanStr = Config.getDBFile("type_scan");
+                typeScanTemp = Integer.parseInt(typeScanStr != null ? typeScanStr.trim() : "1");
+            } catch (Exception ignored) {
             }
+            final int typeScan = typeScanTemp;
+            if (typeScan == 3) return;
+
+            Thread scanThread = new Thread(() -> {
+                performDirectoryScan(messageInfo, requestInfo, typeScan);
+            });
+            scanThread.start();
         }
     }
+
+    private void performDirectoryScan(IHttpRequestResponse messageInfo, IRequestInfo requestInfo, int typeScan) {
+        String dicsStr = mainUI.getRightPanel().getFileContentList().toString()
+                .replace("[", "").replace("]", "");
+        if (dicsStr.trim().isEmpty()) return;
+
+        String[] dictionary = dicsStr.split(",");
+        String urlString = requestInfo.getUrl().toString();
+        String[] parts = urlString.split("\\?", 2);
+        String path = parts[0];
+        String[] pathParts = path.split("/");
+        if (pathParts.length < 3) return;
+
+        String protocol = pathParts[0];
+        String domain = protocol + "//" + pathParts[2];
+
+        int threadNum = getGlobalThreadNum();
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+
+        for (int c = 0; c < threadNum; c++) {
+            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                if (typeScan == 2) {
+                    String currentPath = domain;
+                    for (int i = 3; i < pathParts.length; i++) {
+                        if (routeUrls.add(currentPath)) {
+                            for (String word : dictionary) {
+                                String trimmed = word.trim();
+                                if (!trimmed.isEmpty()) {
+                                    sendDirectoryRequest(messageInfo, requestInfo, currentPath + trimmed);
+                                }
+                            }
+                        }
+                        currentPath += "/" + pathParts[i];
+                    }
+                } else {
+                    if (domainUrls.add(domain)) {
+                        for (String word : dictionary) {
+                            String trimmed = word.trim();
+                            if (!trimmed.isEmpty()) {
+                                sendDirectoryRequest(messageInfo, requestInfo, domain + trimmed);
+                            }
+                        }
+                    }
+                }
+            }, executor);
+            futures.add(future);
+        }
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+    }
+
+    private void sendDirectoryRequest(IHttpRequestResponse originalMessage, IRequestInfo originalRequestInfo, String targetUrl) {
+        try {
+            IExtensionHelpers helpers = callbacks.getHelpers();
+            List<String> headers = new ArrayList<>(originalRequestInfo.getHeaders());
+            if (!headers.isEmpty()) {
+                String firstLine = headers.get(0);
+                int firstSpace = firstLine.indexOf(' ');
+                int secondSpace = firstLine.indexOf(' ', firstSpace + 1);
+                if (firstSpace != -1 && secondSpace != -1) {
+                    String method = firstLine.substring(0, firstSpace);
+                    String version = firstLine.substring(secondSpace + 1);
+                    headers.set(0, method + " " + targetUrl + " " + version);
+                }
+            }
+
+            byte[] body = Arrays.copyOfRange(
+                    originalMessage.getRequest(),
+                    originalRequestInfo.getBodyOffset(),
+                    originalMessage.getRequest().length
+            );
+
+            byte[] newRequest = helpers.buildHttpMessage(headers, body);
+            IHttpRequestResponse resp = callbacks.makeHttpRequest(originalMessage.getHttpService(), newRequest);
+
+            if (resp == null || resp.getResponse() == null) return;
+
+            IResponseInfo respInfo = helpers.analyzeResponse(resp.getResponse());
+            short code = respInfo.getStatusCode();
+            int len = resp.getResponse().length;
+
+            if (code == 200 || code == 403 || (code >= 300 && code < 400)) {
+                mainUI.getRightDownPanel().addResult(targetUrl, String.valueOf(code), len);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     private void sendXssTestRequests(IHttpRequestResponse originalRequestResponse, IParameter param, String xss_url, String xss_method) {
         class XssTestResult {
             final List<String> payloads = new ArrayList<>();
@@ -251,8 +269,10 @@ public class BurpExtender implements IBurpExtender, ITab, IContextMenuFactory, I
             final AtomicInteger completedCount = new AtomicInteger(0);
             final AtomicInteger hitCount = new AtomicInteger(0);
         }
+
         XssTestResult resultGroup = new XssTestResult();
         resultGroup.payloads.addAll(payloads);
+
         for (String payload : payloads) {
             CompletableFuture.runAsync(() -> {
                 try {
@@ -260,53 +280,45 @@ public class BurpExtender implements IBurpExtender, ITab, IContextMenuFactory, I
                     IExtensionHelpers helpers = callbacks.getHelpers();
                     IParameter newParam = helpers.buildParameter(param.getName(), payload, param.getType());
                     byte[] modifiedRequestBytes = helpers.updateParameter(originalRequestBytes, newParam);
-                    IHttpRequestResponse testRequestResponse = callbacks.makeHttpRequest(
+                    IHttpRequestResponse testResp = callbacks.makeHttpRequest(
                             originalRequestResponse.getHttpService(),
                             modifiedRequestBytes
                     );
-                    byte[] responseBytes = testRequestResponse.getResponse();
-                    IResponseInfo responseInfo = helpers.analyzeResponse(responseBytes);
-                    int bodyOffset = responseInfo.getBodyOffset();
-                    byte[] responseBodyBytes = Arrays.copyOfRange(responseBytes, bodyOffset, responseBytes.length);
-                    String responseBodyStr = new String(responseBodyBytes, StandardCharsets.UTF_8);
+
+                    if (testResp.getResponse() == null) return;
+                    IResponseInfo respInfo = helpers.analyzeResponse(testResp.getResponse());
+                    int bodyOffset = respInfo.getBodyOffset();
+                    byte[] bodyBytes = Arrays.copyOfRange(testResp.getResponse(), bodyOffset, testResp.getResponse().length);
+                    String responseBody = new String(bodyBytes, StandardCharsets.UTF_8);
                     String decodedPayload = URLDecoder.decode(payload, StandardCharsets.UTF_8.name());
-                    boolean isHit = decodedPayload != null && !decodedPayload.trim().isEmpty() && responseBodyStr.contains(decodedPayload);
+
+                    boolean isHit = decodedPayload != null && !decodedPayload.trim().isEmpty() && responseBody.contains(decodedPayload);
+
                     synchronized (resultGroup) {
                         if (isHit) {
-                            int statusCode = responseInfo.getStatusCode();
                             resultGroup.hitCount.incrementAndGet();
                             resultGroup.encodedValues.add(param.getName() + "=" + payload);
                             resultGroup.requests.add(modifiedRequestBytes);
-                            resultGroup.statusCodes.add(statusCode);
-                            resultGroup.bodyLengths.add(responseBodyBytes.length);
+                            resultGroup.statusCodes.add((int) respInfo.getStatusCode());
+                            resultGroup.bodyLengths.add(bodyBytes.length);
                         }
+
                         int completed = resultGroup.completedCount.incrementAndGet();
-                        if (completed == payloads.size()) {
-                            int total = payloads.size();
-                            int hits = resultGroup.hitCount.get();
-                            double hitRate = ((double) hits / total) * 100;
-                            String vulnerabilityName;
-                            vulnerabilityName = String.format("存在XSS漏洞(%.0f%%)", hitRate);
-                            if (hits > 0) {
-                                Random rand = new Random();
-                                int randomIndex = rand.nextInt(hits);
+                        if (completed == payloads.size() && resultGroup.hitCount.get() > 0) {
+                            double rate = ((double) resultGroup.hitCount.get() / payloads.size()) * 100;
+                            String vulnName = String.format("存在XSS漏洞(%.0f%%)", rate);
+                            Random rand = new Random();
+                            int idx = rand.nextInt(resultGroup.hitCount.get());
 
-                                String encodedValue = resultGroup.encodedValues.get(randomIndex);
-                                byte[] requestBytes = resultGroup.requests.get(randomIndex);
-                                String statusCode = String.valueOf(resultGroup.statusCodes.get(randomIndex));
-                                int bodyLength = resultGroup.bodyLengths.get(randomIndex);
-
-                                mainUI.getRightDownPanel().addBugResult(
-                                        vulnerabilityName,
-                                        encodedValue,
-                                        xss_url,
-                                        xss_method,
-                                        statusCode,
-                                        bodyLength,
-                                        requestBytes
-                                );
-
-                            }
+                            mainUI.getRightDownPanel().addBugResult(
+                                    vulnName,
+                                    resultGroup.encodedValues.get(idx),
+                                    xss_url,
+                                    xss_method,
+                                    String.valueOf(resultGroup.statusCodes.get(idx)),
+                                    resultGroup.bodyLengths.get(idx),
+                                    resultGroup.requests.get(idx)
+                            );
                         }
                     }
                 } catch (Exception e) {
@@ -315,29 +327,28 @@ public class BurpExtender implements IBurpExtender, ITab, IContextMenuFactory, I
             }, executor);
         }
     }
-
+    @Override
     public List<JMenuItem> createMenuItems(final IContextMenuInvocation invocation) {
         JMenuItem menuItem = new JMenuItem("Save TLA Watcher");
-        menuItem.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent e) {
-                IHttpRequestResponse messageInfo = invocation.getSelectedMessages()[0];
-                IRequestInfo requestInfo = callbacks.getHelpers().analyzeRequest(messageInfo);
-                String url = requestInfo.getUrl().getProtocol()+"://"+requestInfo.getUrl().getHost();
-                int port = requestInfo.getUrl().getPort();
-                String method = requestInfo.getMethod();
-                String route = requestInfo.getUrl().getFile();
-                String remarks = JOptionPane.showInputDialog(null, "请输入注释信息", "备忘录", JOptionPane.PLAIN_MESSAGE);
-                byte[] requestBytes = messageInfo.getRequest();
-                String request = new String(requestBytes);
-                byte[] responseBytes = messageInfo.getResponse();
-                String response = new String(responseBytes);
-                String response1 = new String("");
-                mainUI.insertDataToDatabase(url, port, method, route, request, response1, remarks);
-            }
-        });
-        List<JMenuItem> menuItems = new ArrayList<JMenuItem>();
-        menuItems.add(menuItem);
-        return menuItems;
-    }
+        menuItem.addActionListener(e -> {
+            IHttpRequestResponse[] messages = invocation.getSelectedMessages();
+            if (messages == null || messages.length == 0) return;
 
+            IHttpRequestResponse msg = messages[0];
+            IRequestInfo reqInfo = callbacks.getHelpers().analyzeRequest(msg);
+            URL urlObj = reqInfo.getUrl();
+            String url = urlObj.getProtocol() + "://" + urlObj.getHost();
+            int port = urlObj.getPort();
+            if (port == -1) port = urlObj.getDefaultPort();
+            String method = reqInfo.getMethod();
+            String route = urlObj.getFile();
+            String remarks = JOptionPane.showInputDialog(null, "请输入注释信息", "备忘录", JOptionPane.PLAIN_MESSAGE);
+            String request = new String(msg.getRequest(), StandardCharsets.UTF_8);
+            String response = msg.getResponse() != null ?
+                    new String(msg.getResponse(), StandardCharsets.UTF_8) : "";
+
+            mainUI.insertDataToDatabase(url, port, method, route, request, response, remarks);
+        });
+        return Collections.singletonList(menuItem);
+    }
 }
